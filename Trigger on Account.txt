@@ -1,0 +1,75 @@
+   trigger CreateRecordOnTeamMemberTriggersNew on Account (before insert, before update) {
+    if (Trigger.isBefore && (Trigger.isInsert || (Trigger.isUpdate && Trigger.isChanged('Active__c')))) {
+        List<SQX_Team_Members__c> teamMembers = new List<SQX_Team_Members__c>();
+
+        for (Account acc : Trigger.new) {
+            SQX_Team_Members__c teamMember1 = new SQX_Team_Members__c();
+            teamMember1.Name = 'Team Member 1';
+            teamMember1.Contact_Info__c = null; 
+            teamMember1.Member_Type__c = null; 
+            teamMember1.Account__c = acc.Id;
+
+            SQX_Team_Members__c teamMember2 = new SQX_Team_Members__c();
+            teamMember2.Name = 'Team Member 2';
+            teamMember2.Contact_Info__c = null; 
+            teamMember2.Member_Type__c = null; 
+            teamMember2.Account__c = acc.Id;
+
+            teamMembers.add(teamMember1);
+            teamMembers.add(teamMember2);
+        }
+
+        if (!teamMembers.isEmpty()) {
+            insert teamMembers;
+        }
+
+        Set<Id> accountIds = new Set<Id>();
+        for (Account acc : Trigger.new) {
+            if (Trigger.isInsert || (Trigger.isUpdate && acc.Active__c != Trigger.oldMap.get(acc.Id).Active__c)) {
+                accountIds.add(acc.Id);
+            }
+        }
+
+        if (!accountIds.isEmpty()) {
+            List<SQX_Team_Members__c> hrAdminMembers = [
+                SELECT Id, Account__c, Member_Type__c
+                FROM SQX_Team_Members__c
+                WHERE Account__c IN :accountIds
+                AND Member_Type__c IN ('HR', 'Admin')
+            ];
+
+            Set<Id> accountsWithoutHRAdminMembers = new Set<Id>();
+            for (Account acc : Trigger.new) {
+                if (Trigger.isInsert || (Trigger.isUpdate && acc.Active__c != Trigger.oldMap.get(acc.Id).Active__c)) {
+                    Boolean hasHRAdminMember = false;
+                    for (SQX_Team_Members__c member : hrAdminMembers) {
+                        if (member.Account__c == acc.Id) {
+                            hasHRAdminMember = true;
+                            break;
+                        }
+                    }
+                    if (!hasHRAdminMember) {
+                        accountsWithoutHRAdminMembers.add(acc.Id);
+                    }
+                }
+            }
+
+            if (!accountsWithoutHRAdminMembers.isEmpty()) {
+                for (Account acc : Trigger.new) {
+                    if (accountsWithoutHRAdminMembers.contains(acc.Id)) {
+                        acc.addError('Accounts cannot be activated without team members of HR and Admin member type.');
+                    }
+                }
+            }
+
+            // Check permission set
+            for (Account acc : Trigger.new) {
+                if (Trigger.isInsert || (Trigger.isUpdate && acc.Active__c != Trigger.oldMap.get(acc.Id).Active__c)) {
+                    if (!acc.Account_Admin__c) {
+                        acc.addError('Accounts can only be activated by users with the Account_Admin permission set.');
+                    }
+                }
+            }
+        }
+    }
+}
